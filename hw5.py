@@ -28,61 +28,56 @@ def send(sock: socket.socket, data: bytes):
     # over the network, pausing half a second between sends to let the
     # network "rest" :)
     logger = homework5.logging.get_logger("hw5-sender")
-    chunk_size = homework5.MAX_PACKET - 8  # Reduce chunk size to accommodate header
+    chunk_size = homework5.MAX_PACKET - 8  # Reserve 4 bytes for header and 4 for checksum
     packets = []
-    ack_times = {}  # Dictionary to track send times for RTT calculation
+    ack_times = {}  # Track packet sending times for RTT calculation
 
+    # Prepare packets
     for i in range(0, len(data), chunk_size):
         seq_num = i // chunk_size
         header = struct.pack('!I', seq_num)
-        packets.append(header + data[i:i + chunk_size])
+        payload = data[i:i + chunk_size]
+        checksum = sum(header + payload) & 0xFFFFFFFF  # Simple checksum
+        packets.append(header + struct.pack('!I', checksum) + payload)
 
     base = 0
     next_seq = 0
-    window_size = 2  # Allow only 2 packets in flight
+    window_size = 2
     estimated_rtt = 0.1
     dev_rtt = 0.05
     alpha, beta = 0.125, 0.25
     acked = set()
 
     while base < len(packets):
-        # Send packets in the window
         while next_seq < base + window_size and next_seq < len(packets):
             if next_seq not in acked:
                 sock.send(packets[next_seq])
-                ack_times[next_seq] = time.time()  # Record send time
+                ack_times[next_seq] = time.time()
                 logger.info(f"Sent packet {next_seq}")
             next_seq += 1
 
         try:
-            # Dynamically set timeout
             timeout = estimated_rtt + 4 * dev_rtt
             sock.settimeout(timeout)
-
-            # Receive ACK
             ack = sock.recv(8)
-            ack_seq = struct.unpack('!I', ack)[0]
+            ack_seq = struct.unpack('!I', ack[:4])[0]
             logger.info(f"Received ACK for {ack_seq}")
 
             if ack_seq >= base:
-                # Slide the window and mark packets as acknowledged
                 for seq in range(base, ack_seq + 1):
                     acked.add(seq)
                 base = ack_seq + 1
 
-            # Update RTT
             if ack_seq in ack_times:
                 rtt_sample = time.time() - ack_times[ack_seq]
                 estimated_rtt = (1 - alpha) * estimated_rtt + alpha * rtt_sample
                 dev_rtt = (1 - beta) * dev_rtt + beta * abs(rtt_sample - estimated_rtt)
 
         except socket.timeout:
-            # Timeout handling
-            logger.warning(f"Timeout. Retransmitting from base {base}")
-            next_seq = base  # Retransmit from base
+            logger.warning("Timeout occurred. Retransmitting.")
+            next_seq = base
 
-    # Send final packet to indicate end of transmission
-    final_packet = struct.pack('!I', 2**32 - 1)
+    final_packet = struct.pack('!I', 2**32 - 1) + struct.pack('!I', 0)
     sock.send(final_packet)
     logger.info("Sent final packet to signal completion.")
 
@@ -106,32 +101,30 @@ def recv(sock: socket.socket, dest: io.BufferedIOBase) -> int:
 
     while True:
         try:
-            # Receive a packet
             packet = sock.recv(homework5.MAX_PACKET)
             if not packet:
                 break
 
-            # Extract sequence number and payload
-            seq_num, = struct.unpack('!I', packet[:4])
-            payload = packet[4:]
+            seq_num = struct.unpack('!I', packet[:4])[0]
+            checksum = struct.unpack('!I', packet[4:8])[0]
+            payload = packet[8:]
 
-            if seq_num == 2**32 - 1:  # Final packet
+            if seq_num == 2**32 - 1:
                 logger.info("Received final packet. Ending reception.")
                 break
 
-            # Log the received packet
-            logger.info(f"Received packet {seq_num}, length {len(payload)}")
+            calculated_checksum = sum(packet[:4] + payload) & 0xFFFFFFFF
+            if checksum != calculated_checksum:
+                logger.warning(f"Checksum mismatch for packet {seq_num}. Dropping packet.")
+                continue
 
-            # Store the packet if it matches the expected sequence
             if seq_num not in received_packets:
                 received_packets[seq_num] = payload
 
-            # Send acknowledgment for the packet
             ack = struct.pack('!I', seq_num)
             sock.send(ack)
             logger.info(f"Sent ACK for packet {seq_num}")
 
-            # Write consecutive packets to the destination
             while expected_seq in received_packets:
                 dest.write(received_packets[expected_seq])
                 num_bytes += len(received_packets[expected_seq])
