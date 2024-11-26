@@ -28,13 +28,43 @@ def send(sock: socket.socket, data: bytes):
     # over the network, pausing half a second between sends to let the
     # network "rest" :)
     logger = homework5.logging.get_logger("hw5-sender")
-    chunk_size = homework5.MAX_PACKET
-    pause = .1
-    offsets = range(0, len(data), homework5.MAX_PACKET)
-    for chunk in [data[i:i + chunk_size] for i in offsets]:
-        sock.send(chunk)
-        logger.info("Pausing for %f seconds", round(pause, 2))
-        time.sleep(pause)
+    MAX_SEQ = 2  # Maximum sequence numbers (0 and 1)
+    seq_num = 0  # Sequence number of the next packet to send
+    base = 0  # Oldest unacknowledged packet
+    packet_queue = []  # Packets in flight
+    chunk_size = homework5.MAX_PACKET - 8  # Adjust for header size
+    offsets = range(0, len(data), chunk_size)
+
+    # Prepare packets
+    packets = []
+    for i, chunk in enumerate(data[i:i + chunk_size] for i in offsets):
+        header = struct.pack('!I', i % MAX_SEQ)  # Sequence number
+        packets.append(header + chunk)
+
+    estimated_rtt = 0.1
+    dev_rtt = 0.01
+
+    while base < len(packets):
+        # Send packets within the window
+        while seq_num < base + 2 and seq_num < len(packets):
+            sock.send(packets[seq_num])
+            logger.info(f"Sent packet {seq_num % MAX_SEQ}")
+            seq_num += 1
+
+        # Wait for ACKs
+        try:
+            sock.settimeout(estimated_rtt + 4 * dev_rtt)
+            ack = sock.recv(8)
+            ack_seq = struct.unpack('!I', ack[:4])[0]
+            logger.info(f"Received ACK for {ack_seq}")
+
+            # Slide window
+            if ack_seq == base % MAX_SEQ:
+                base += 1
+
+        except socket.timeout:
+            logger.warning(f"Timeout for packet {base % MAX_SEQ}, retransmitting")
+            seq_num = base  # Retransmit from the base of the window
 
 
 def recv(sock: socket.socket, dest: io.BufferedIOBase) -> int:
@@ -50,15 +80,31 @@ def recv(sock: socket.socket, dest: io.BufferedIOBase) -> int:
         The number of bytes written to the destination.
     """
     logger = homework5.logging.get_logger("hw5-receiver")
-    # Naive solution, where we continually read data off the socket
-    # until we don't receive any more data, and then return.
+    expected_seq = 0
     num_bytes = 0
+
     while True:
-        data = sock.recv(homework5.MAX_PACKET)
-        if not data:
-            break
-        logger.info("Received %d bytes", len(data))
-        dest.write(data)
-        num_bytes += len(data)
-        dest.flush()
+        try:
+            packet = sock.recv(homework5.MAX_PACKET)
+            if not packet:
+                break
+
+            seq_num = struct.unpack('!I', packet[:4])[0]
+            data = packet[4:]
+
+            # Only accept in-order packets
+            if seq_num == expected_seq:
+                dest.write(data)
+                dest.flush()
+                num_bytes += len(data)
+                expected_seq = (expected_seq + 1) % 2
+
+            # Send ACK
+            ack = struct.pack('!I', seq_num)
+            sock.send(ack)
+            logger.info(f"Sent ACK for {seq_num}")
+
+        except socket.timeout:
+            logger.warning("Socket timeout, waiting for data")
+
     return num_bytes
