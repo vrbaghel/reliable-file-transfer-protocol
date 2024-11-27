@@ -49,7 +49,7 @@ def send(sock: socket.socket, data: bytes):
     base = 0
     next_seq = 0
     window_size = 2
-    estimated_rtt = 0.1 # Estimated round trip time.
+    estimated_rtt = 0.5 # Estimated round trip time.
     dev_rtt = 0.1 # Deviation of round trip time.
     alpha, beta = 0.125, 0.25 # The alpha and beta parameters for the EWMA algorithm.
     acked = set() # Set of packets that have been acknowledged.
@@ -68,9 +68,9 @@ def send(sock: socket.socket, data: bytes):
             # acknowledged.
             timeout = estimated_rtt + 4 * dev_rtt
             sock.settimeout(timeout)
-            ack = sock.recv(8)
+            ack = sock.recv(4)
             logger.info(f"Received ACK: {ack}")
-            ack_seq = struct.unpack('!I', ack[:4])[0]
+            ack_seq = struct.unpack('!I', ack)[0]
             logger.info(f"Received ACK for {ack_seq}")
 
             if ack_seq >= base:
@@ -89,9 +89,9 @@ def send(sock: socket.socket, data: bytes):
 
         except socket.timeout:
             logger.warning("Timeout occurred. Retransmitting.")
-            # If a timeout occurs, increase the estimated RTT and deviation
+            # If a timeout occurs, increase the estimated RTT
             # so that we wait longer for the packets to be acknowledged.
-            dev_rtt += 0.5
+            estimated_rtt += 0.5
             # Go back to the base of the window and start again.
             next_seq = base
 
@@ -143,6 +143,13 @@ def recv(sock: socket.socket, dest: io.BufferedIOBase) -> int:
             # Store the packet if it's not already received
             if seq_num not in received_packets:
                 received_packets[seq_num] = payload
+            else:
+                logger.warning(f"Duplicate packet {seq_num}. Dropping packet.")
+                # Send acknowledgment for the duplicate packet
+                ack = struct.pack('!I', seq_num)
+                sock.send(ack)
+                logger.info(f"Sent ACK for packet {seq_num}")
+                continue  # Drop the packet if it's a duplicate
 
             # Write sequential packets to the destination
             while expected_seq in received_packets:
