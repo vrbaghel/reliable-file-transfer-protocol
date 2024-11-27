@@ -76,9 +76,10 @@ def send(sock: socket.socket, data: bytes):
             if ack_seq >= base:
                 # If we received an ACK for a packet that is in our window,
                 # slide the window forward and update the base.
-                for seq in range(base, ack_seq + 1):
-                    acked.add(seq)
-                base = ack_seq + 1
+                prev_ack = all(seq in acked for seq in range(base, ack_seq))
+                if prev_ack:
+                  acked.add(ack_seq)
+                  base = ack_seq + 1
 
             if ack_seq in ack_times:
                 # Calculate the RTT sample and update the estimated RTT and
@@ -91,7 +92,7 @@ def send(sock: socket.socket, data: bytes):
             logger.warning("Timeout occurred. Retransmitting.")
             # If a timeout occurs, increase the estimated RTT
             # so that we wait longer for the packets to be acknowledged.
-            estimated_rtt += 0.5
+            # estimated_rtt += 0.5
             # Go back to the base of the window and start again.
             next_seq = base
             # Remove any packets that have already been acknowledged after the base
