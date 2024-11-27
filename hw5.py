@@ -94,6 +94,9 @@ def send(sock: socket.socket, data: bytes):
             estimated_rtt += 0.5
             # Go back to the base of the window and start again.
             next_seq = base
+            # Remove any packets that have already been acknowledged after the base
+            logger.info(f"**** Acked: {acked}, base: {base} ****")
+            acked = {seq for seq in acked if seq < next_seq}
 
     final_packet = struct.pack('!I', 2**32 - 1) + struct.pack('!I', 0)
     sock.send(final_packet)
