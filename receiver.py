@@ -7,7 +7,7 @@ to STDOUT.
 import argparse
 import sys
 import logging
-import homework5.wire
+import utils.wire
 import hw5
 
 PARSER = argparse.ArgumentParser(description="Client script for sending data "

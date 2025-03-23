@@ -8,7 +8,7 @@ import socket
 import binascii
 import hashlib
 import struct
-import homework5.logging
+import utils.logging
 
 
 def data_rep(data: bytes) -> str:

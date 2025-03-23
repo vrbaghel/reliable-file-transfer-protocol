@@ -8,8 +8,8 @@ import io
 import time
 import typing
 import struct
-import homework5
-import homework5.logging
+import utils
+import utils.logging
 
 
 def send(sock: socket.socket, data: bytes):

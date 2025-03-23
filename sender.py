@@ -5,7 +5,7 @@ Client that sends STDIN, over a simulated faulty network connection.
 
 import argparse
 import logging
-import homework5.wire
+import utils.wire
 import hw5
 
 PARSER = argparse.ArgumentParser(description="Client script for sending data "

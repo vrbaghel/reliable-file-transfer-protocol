@@ -11,8 +11,8 @@ import os
 import tempfile
 import signal
 import logging
-import homework5.logging
-import homework5.utils
+import utils.logging
+import utils.utils
 
 DESC = sys.modules[globals()['__name__']].__doc__
 PARSER = argparse.ArgumentParser(description=DESC)
